@@ -41,7 +41,26 @@ export GITHUB_TOKEN=your_github_token_here
 
 ## Quick Start
 
-### 1. Generate dataset from configured repositories
+### 1. Auto-discover ML/AI repositories
+
+```bash
+# Discover popular ML repos and generate config
+sft-dataset discover
+
+# Use only curated high-quality repos
+sft-dataset discover --no-topics --curated
+
+# Discover with custom filters
+sft-dataset discover --min-stars 5000 --min-releases 5
+
+# Browse by topic
+sft-dataset browse-topics -t llm -t transformers
+
+# List curated repos
+sft-dataset list-curated
+```
+
+### 2. Generate dataset from configured repositories
 
 ```bash
 # Use default configuration
@@ -57,7 +76,7 @@ sft-dataset generate --no-deps
 sft-dataset generate --format parquet
 ```
 
-### 2. Process a single repository
+### 3. Process a single repository
 
 ```bash
 # Process HuggingFace transformers
@@ -67,7 +86,7 @@ sft-dataset single huggingface/transformers --max-versions 10
 sft-dataset single vllm-project/vllm --max-versions 5
 ```
 
-### 3. Explore repositories
+### 4. Explore repositories
 
 ```bash
 # List configured repositories
@@ -167,18 +186,37 @@ sft-codebase-dataset/
 └── output/                   # Generated datasets
 ```
 
+## Repository Discovery
+
+The tool can automatically discover ML/AI repositories:
+
+### Curated List (50+ repos)
+
+Hand-picked high-quality repositories organized by category:
+
+- **Core ML Frameworks**: PyTorch, TensorFlow, JAX, MLX
+- **HuggingFace Ecosystem**: Transformers, Diffusers, Accelerate, PEFT, TRL
+- **Inference Engines**: vLLM, TensorRT-LLM, llama.cpp, MLC-LLM
+- **LLM Frameworks**: LangChain, LlamaIndex, LiteLLM
+- **Training**: LLaMA-Factory, Axolotl, DeepSpeed, PyTorch Lightning
+- **Model Implementations**: Llama, Qwen, Mistral, ChatGLM
+
+### Topic-Based Discovery
+
+Searches GitHub topics including:
+- `large-language-models`, `llm`, `transformers`
+- `deep-learning`, `machine-learning`, `pytorch`
+- `nlp`, `computer-vision`, `generative-ai`
+- `mlops`, `model-serving`, `inference`
+
+```bash
+# Discover and generate config
+sft-dataset discover --min-stars 1000 --min-releases 2
+```
+
 ## Supported Repositories
 
-The tool works with any public GitHub repository that has tagged releases. Pre-configured repositories include:
-
-| Repository | Description |
-|------------|-------------|
-| huggingface/transformers | HuggingFace Transformers |
-| NVIDIA/TensorRT-LLM | TensorRT-LLM inference |
-| vllm-project/vllm | vLLM inference engine |
-| pytorch/pytorch | PyTorch framework |
-| openai/triton | Triton compiler |
-| langchain-ai/langchain | LangChain framework |
+The tool works with any public GitHub repository that has tagged releases.
 
 ## Dependency Resolution
 
@@ -229,12 +267,30 @@ dataset.push_to_hub("your-username/sft-codebase-diffs")
 - **Network**: GitHub API access (authenticated recommended)
 - **Time**: 1-10 minutes per repository depending on size
 
+## File Handling
+
+### All Files Included
+
+Unlike typical tools that exclude tests/docs, this generator includes **everything** because tests and documentation often change significantly between versions and provide valuable training signal.
+
+### Binary File Stubs
+
+Binary and media files are replaced with small placeholder stubs to preserve references while keeping dataset size manageable:
+
+```
+[BINARY IMAGE: 45,231 bytes]
+[BINARY MODEL/DATA: 1,234,567 bytes]
+[BINARY ARCHIVE: 89,012 bytes]
+[FILE TOO LARGE: 5,000,000 bytes - content omitted]
+```
+
+This preserves the file structure while avoiding bloated datasets.
+
 ## Limitations
 
 - Only processes tagged releases (not arbitrary commits)
 - Dependency resolution limited to Python packages
 - Large diffs may be truncated
-- Binary files are excluded
 
 ## Contributing
 

@@ -10,6 +10,7 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 
+from .auto_discover import AutoDiscover, CURATED_REPOS, ML_TOPICS, discover_and_save
 from .codebase_loader import CodebaseLoader
 from .config import Config, RepoConfig
 from .dependency_resolver import DependencyResolver
@@ -494,6 +495,90 @@ def search(ctx, query, language, min_stars, max_results):
     console.print(f"\n[bold]Search results for '{query}':[/bold]\n")
     for repo in repos:
         console.print(f"  - {repo}")
+
+
+@cli.command()
+@click.option("--output", "-o", default="configs/repos.yaml", help="Output YAML path")
+@click.option("--curated/--no-curated", default=True, help="Include curated ML repos")
+@click.option("--topics/--no-topics", default=True, help="Discover by GitHub topics")
+@click.option("--min-stars", "-s", type=int, default=1000, help="Minimum stars")
+@click.option("--min-releases", "-r", type=int, default=2, help="Minimum releases")
+@click.pass_context
+def discover(ctx, output, curated, topics, min_stars, min_releases):
+    """Auto-discover ML/AI repositories and generate config.
+    
+    This searches GitHub for popular ML/AI repositories with releases
+    and generates a repos.yaml configuration file.
+    """
+    config = ctx.obj["config"]
+    
+    repos = discover_and_save(
+        output_path=output,
+        use_curated=curated,
+        discover_topics=topics,
+        min_stars=min_stars,
+        min_releases=min_releases,
+        github_token=config.github_token,
+    )
+    
+    console.print(f"\n[green]Discovered {len(repos)} repositories[/green]")
+    console.print(f"[green]Configuration saved to {output}[/green]")
+
+
+@cli.command()
+@click.option("--topic", "-t", multiple=True, help="Specific topics to search")
+@click.option("--min-stars", "-s", type=int, default=500, help="Minimum stars")
+@click.option("--max-results", "-n", type=int, default=20, help="Max results per topic")
+@click.pass_context
+def browse_topics(ctx, topic, min_stars, max_results):
+    """Browse repositories by GitHub topic.
+    
+    Examples:
+        sft-dataset browse-topics -t llm -t transformers
+        sft-dataset browse-topics --min-stars 5000
+    """
+    config = ctx.obj["config"]
+    discoverer = AutoDiscover(config.github_token)
+    
+    topics_to_search = list(topic) if topic else ML_TOPICS[:5]
+    
+    for t in topics_to_search:
+        repos = discoverer.discover_by_topic(
+            topic=t,
+            min_stars=min_stars,
+            max_results=max_results,
+        )
+        discoverer.display_repos(repos, title=f"Topic: {t}")
+        console.print()
+
+
+@cli.command()
+@click.pass_context
+def list_curated(ctx):
+    """List all curated ML/AI repositories.
+    
+    These are hand-picked high-quality repositories that are known
+    to have good release practices and valuable training data.
+    """
+    console.print("\n[bold]Curated ML/AI Repositories:[/bold]\n")
+    
+    categories = {
+        "Core ML Frameworks": ["pytorch/pytorch", "tensorflow/tensorflow", "google/jax", "apple/mlx"],
+        "HuggingFace Ecosystem": [r for r in CURATED_REPOS if "huggingface" in r],
+        "Inference Engines": ["vllm-project/vllm", "NVIDIA/TensorRT-LLM", "ggerganov/llama.cpp", "mlc-ai/mlc-llm"],
+        "LLM Frameworks": ["langchain-ai/langchain", "run-llama/llama_index", "BerriAI/litellm"],
+        "Training & Fine-tuning": ["hiyouga/LLaMA-Factory", "OpenAccess-AI-Collective/axolotl", "microsoft/DeepSpeed"],
+    }
+    
+    for category, repos in categories.items():
+        console.print(f"[cyan]{category}:[/cyan]")
+        for repo in repos:
+            if repo in CURATED_REPOS:
+                console.print(f"  • {repo}")
+        console.print()
+    
+    console.print(f"[dim]Total curated repos: {len(CURATED_REPOS)}[/dim]")
+    console.print("\n[dim]Run 'sft-dataset discover --curated' to fetch metadata and generate config[/dim]")
 
 
 def main():
