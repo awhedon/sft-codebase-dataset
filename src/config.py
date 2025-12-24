@@ -40,7 +40,22 @@ class Settings:
     dependency_depth: int = 1
     output_format: str = "jsonl"
     upload_to_hub: bool = False
-    hub_dataset_name: str = "sft-codebase-diffs"
+    hub_username: str = ""  # HuggingFace username/org
+    hub_naming: str = "combined"  # "combined" or "per_repo"
+    hub_dataset_name: str = "sft-codebase-diffs"  # Base name for combined
+
+    def get_hub_dataset_name(self, repo_name: Optional[str] = None) -> str:
+        """Get the full dataset name for HuggingFace Hub."""
+        if self.hub_naming == "per_repo" and repo_name:
+            # Convert "owner/repo" to "sft-owner-repo"
+            safe_name = repo_name.replace("/", "-").lower()
+            base_name = f"sft-{safe_name}"
+        else:
+            base_name = self.hub_dataset_name
+
+        if self.hub_username:
+            return f"{self.hub_username}/{base_name}"
+        return base_name
 
 
 @dataclass
@@ -79,6 +94,8 @@ class Config:
             dependency_depth=settings_data.get("dependency_depth", 1),
             output_format=settings_data.get("output_format", "jsonl"),
             upload_to_hub=settings_data.get("upload_to_hub", False),
+            hub_username=settings_data.get("hub_username", ""),
+            hub_naming=settings_data.get("hub_naming", "combined"),
             hub_dataset_name=settings_data.get("hub_dataset_name", "sft-codebase-diffs"),
         )
 

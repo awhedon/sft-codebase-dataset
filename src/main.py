@@ -278,10 +278,12 @@ class SFTDatasetGenerator:
         self,
         examples: list[SFTExample],
         dataset_name: Optional[str] = None,
-        private: bool = True,
+        repo_name: Optional[str] = None,
+        private: bool = False,
     ) -> str:
         """Upload dataset to HuggingFace Hub."""
-        dataset_name = dataset_name or self.config.settings.hub_dataset_name
+        if dataset_name is None:
+            dataset_name = self.config.settings.get_hub_dataset_name(repo_name)
         return self.sft_formatter.upload_to_hub(examples, dataset_name, private)
 
 
@@ -339,13 +341,14 @@ def cli(ctx, config, output, cache):
 )
 @click.option(
     "--upload/--no-upload",
-    default=False,
-    help="Upload to HuggingFace Hub",
+    default=None,
+    help="Upload to HuggingFace Hub (default: use config setting)",
 )
 @click.pass_context
 def generate(ctx, include_deps, format, upload):
     """Generate the SFT dataset from configured repositories."""
     generator = ctx.obj["generator"]
+    config = ctx.obj["config"]
 
     # Generate dataset
     examples = generator.generate_dataset(include_dependencies=include_deps)
@@ -362,10 +365,13 @@ def generate(ctx, include_deps, format, upload):
     for path in saved_files:
         console.print(f"  - {path}")
 
-    # Upload if requested
-    if upload:
+    # Upload if requested (CLI flag overrides config)
+    should_upload = upload if upload is not None else config.settings.upload_to_hub
+    if should_upload:
+        dataset_name = config.settings.get_hub_dataset_name()
+        console.print(f"\n[cyan]Uploading to HuggingFace Hub as {dataset_name}...[/cyan]")
         url = generator.upload_to_hub(examples)
-        console.print(f"\nUploaded to: {url}")
+        console.print(f"[green]Uploaded to: {url}[/green]")
 
 
 @cli.command()

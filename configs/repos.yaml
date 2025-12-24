@@ -48,9 +48,17 @@ settings:
   output_format: "jsonl"
   
   # Whether to upload to HuggingFace Hub
-  upload_to_hub: false
+  upload_to_hub: true
   
-  # HuggingFace dataset name (if uploading)
+  # HuggingFace Hub username/org
+  hub_username: "awhedon"
+  
+  # Dataset naming convention:
+  #   "combined" -> {hub_username}/sft-codebase-diffs (all repos in one dataset)
+  #   "per_repo" -> {hub_username}/sft-{repo_name} (separate dataset per repo)
+  hub_naming: "combined"
+  
+  # Base name for combined dataset
   hub_dataset_name: "sft-codebase-diffs"
   
   # Binary/media file extensions to replace with stubs (preserves reference)
