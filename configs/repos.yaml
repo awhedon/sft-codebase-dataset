@@ -1,0 +1,104 @@
+# Repository configuration for SFT dataset generation
+# Each repository entry specifies:
+#   - name: GitHub repo in format "owner/repo"
+#   - description: Brief description of the repository
+#   - min_version: (optional) Minimum version to start from
+#   - max_versions: (optional) Maximum number of version pairs to generate
+#   - file_patterns: (optional) Glob patterns to include (default: all code files)
+#   - exclude_patterns: (optional) Glob patterns to exclude
+
+repositories:
+  - name: "NVIDIA/TensorRT-LLM"
+    description: "NVIDIA's TensorRT-LLM library for LLM inference optimization"
+    file_patterns:
+      - "*.py"
+      - "*.cpp"
+      - "*.h"
+      - "*.cu"
+      - "*.cuh"
+    exclude_patterns:
+      - "tests/*"
+      - "examples/*"
+      - "benchmarks/*"
+
+  - name: "huggingface/transformers"
+    description: "HuggingFace Transformers library"
+    file_patterns:
+      - "*.py"
+    exclude_patterns:
+      - "tests/*"
+      - "examples/*"
+      - "docs/*"
+
+  - name: "pytorch/pytorch"
+    description: "PyTorch deep learning framework"
+    file_patterns:
+      - "*.py"
+      - "*.cpp"
+      - "*.h"
+      - "*.cu"
+    exclude_patterns:
+      - "test/*"
+      - "benchmarks/*"
+      - "docs/*"
+
+  - name: "vllm-project/vllm"
+    description: "vLLM high-throughput LLM inference engine"
+    file_patterns:
+      - "*.py"
+      - "*.cpp"
+      - "*.h"
+      - "*.cu"
+    exclude_patterns:
+      - "tests/*"
+      - "benchmarks/*"
+
+  - name: "openai/triton"
+    description: "OpenAI Triton language and compiler"
+    file_patterns:
+      - "*.py"
+      - "*.cpp"
+      - "*.h"
+    exclude_patterns:
+      - "test/*"
+      - "docs/*"
+
+  - name: "mlflow/mlflow"
+    description: "MLflow ML lifecycle platform"
+    file_patterns:
+      - "*.py"
+    exclude_patterns:
+      - "tests/*"
+      - "docs/*"
+
+  - name: "langchain-ai/langchain"
+    description: "LangChain framework for LLM applications"
+    file_patterns:
+      - "*.py"
+    exclude_patterns:
+      - "tests/*"
+      - "docs/*"
+
+# Global settings
+settings:
+  # Maximum file size to include (in bytes)
+  max_file_size: 1048576  # 1MB
+  
+  # Maximum total codebase size (in bytes)
+  max_codebase_size: 104857600  # 100MB
+  
+  # Whether to include dependency source code
+  include_dependencies: true
+  
+  # Dependency resolution depth
+  dependency_depth: 1
+  
+  # Output format: "jsonl", "parquet", or "huggingface"
+  output_format: "jsonl"
+  
+  # Whether to upload to HuggingFace Hub
+  upload_to_hub: false
+  
+  # HuggingFace dataset name (if uploading)
+  hub_dataset_name: "sft-codebase-diffs"
+
