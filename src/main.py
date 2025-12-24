@@ -55,6 +55,7 @@ class SFTDatasetGenerator:
         self,
         repo_config: RepoConfig,
         include_dependencies: bool = True,
+        streaming: bool = False,
     ) -> list[SFTExample]:
         """
         Process a single repository and generate SFT examples.
@@ -62,6 +63,7 @@ class SFTDatasetGenerator:
         Args:
             repo_config: Repository configuration
             include_dependencies: Whether to include dependency codebases
+            streaming: Stream examples to disk immediately
 
         Returns:
             List of SFT examples for this repository
@@ -120,7 +122,12 @@ class SFTDatasetGenerator:
                         include_dependencies=include_dependencies,
                     )
                     if example:
-                        examples.append(example)
+                        if streaming:
+                            # Write to disk immediately and free memory
+                            self.sft_formatter.stream_example(example)
+                            examples.append(None)  # Placeholder for count
+                        else:
+                            examples.append(example)
                         console.print(
                             f"[green]✓ Created example for "
                             f"{from_release.tag_name} -> {to_release.tag_name}[/green]"
@@ -198,31 +205,39 @@ class SFTDatasetGenerator:
     def generate_dataset(
         self,
         include_dependencies: bool = True,
+        streaming: bool = True,
     ) -> list[SFTExample]:
         """
         Generate the complete SFT dataset.
 
         Args:
             include_dependencies: Whether to include dependency codebases
+            streaming: Write examples to disk incrementally to save memory
 
         Returns:
-            List of all SFT examples
+            List of all SFT examples (lightweight metadata if streaming)
         """
-        all_examples = []
-
         console.print(
             Panel(
                 f"[bold]SFT Dataset Generator[/bold]\n"
                 f"Repositories: {len(self.config.repositories)}\n"
-                f"Include Dependencies: {include_dependencies}",
+                f"Include Dependencies: {include_dependencies}\n"
+                f"Streaming Mode: {streaming} (saves memory)",
                 title="Starting Generation",
             )
         )
+
+        if streaming:
+            # Start streaming to disk immediately
+            self.sft_formatter.start_streaming()
+
+        all_examples = []
 
         for repo_config in self.config.repositories:
             examples = self.process_repository(
                 repo_config=repo_config,
                 include_dependencies=include_dependencies,
+                streaming=streaming,
             )
             all_examples.extend(examples)
 
@@ -230,19 +245,25 @@ class SFTDatasetGenerator:
                 f"[green]Completed {repo_config.name}: {len(examples)} examples[/green]\n"
             )
 
+        if streaming:
+            # Close files and get metadata
+            all_examples = self.sft_formatter.finish_streaming()
+
         return all_examples
 
     def save_dataset(
         self,
         examples: list[SFTExample],
         output_format: Optional[str] = None,
+        streaming: bool = True,
     ) -> list[Path]:
         """
         Save the dataset to disk.
 
         Args:
-            examples: List of SFT examples
+            examples: List of SFT examples (may be lightweight metadata if streaming)
             output_format: Output format (jsonl, parquet, or both)
+            streaming: Whether streaming mode was used
 
         Returns:
             List of saved file paths
@@ -250,21 +271,32 @@ class SFTDatasetGenerator:
         output_format = output_format or self.config.settings.output_format
         saved_files = []
 
-        if output_format in ("jsonl", "both"):
-            # Save raw JSONL
-            path = self.sft_formatter.save_examples_jsonl(examples, "dataset.jsonl")
-            saved_files.append(path)
+        if streaming:
+            # Data already written to disk, just record paths
+            jsonl_path = self.config.output_dir / "dataset.jsonl.gz"
+            chat_path = self.config.output_dir / "dataset_chat.jsonl.gz"
+            if jsonl_path.exists():
+                saved_files.append(jsonl_path)
+            if chat_path.exists():
+                saved_files.append(chat_path)
+        else:
+            if output_format in ("jsonl", "both"):
+                path = self.sft_formatter.save_examples_jsonl(examples, "dataset.jsonl")
+                saved_files.append(path)
+                path = self.sft_formatter.save_examples_chat_jsonl(examples, "dataset_chat.jsonl")
+                saved_files.append(path)
 
-            # Save chat format
-            path = self.sft_formatter.save_examples_chat_jsonl(examples, "dataset_chat.jsonl")
-            saved_files.append(path)
-
-        if output_format in ("parquet", "both"):
-            path = self.sft_formatter.save_examples_parquet(examples, "dataset.parquet")
-            saved_files.append(path)
+            if output_format in ("parquet", "both"):
+                path = self.sft_formatter.save_examples_parquet(examples, "dataset.parquet")
+                saved_files.append(path)
 
         # Save statistics report
-        stats_report = self.sft_formatter.generate_stats_report(examples)
+        if streaming:
+            stats = self.sft_formatter.compute_statistics_streaming(examples)
+            stats_report = self.sft_formatter._format_stats_report(stats)
+        else:
+            stats_report = self.sft_formatter.generate_stats_report(examples)
+        
         stats_path = self.config.output_dir / "stats.md"
         with open(stats_path, "w") as f:
             f.write(stats_report)
@@ -272,7 +304,13 @@ class SFTDatasetGenerator:
 
         # Save dataset card (README.md for HuggingFace)
         dataset_name = self.config.settings.get_hub_dataset_name()
-        dataset_card = self.sft_formatter.generate_dataset_card(examples, dataset_name)
+        if streaming:
+            # Reconstruct stats for dataset card
+            stats = self.sft_formatter.compute_statistics_streaming(examples)
+            dataset_card = self._generate_dataset_card_from_stats(stats, dataset_name)
+        else:
+            dataset_card = self.sft_formatter.generate_dataset_card(examples, dataset_name)
+        
         card_path = self.config.output_dir / "README.md"
         with open(card_path, "w") as f:
             f.write(dataset_card)
@@ -280,7 +318,15 @@ class SFTDatasetGenerator:
 
         return saved_files
 
-    def print_summary(self, examples: list[SFTExample]) -> None:
+    def _generate_dataset_card_from_stats(self, stats: dict, dataset_name: str) -> str:
+        """Generate dataset card from pre-computed stats."""
+        if not stats:
+            return "# Empty Dataset\n\nNo examples generated."
+        
+        # Use the formatter's method but with our stats
+        return self.sft_formatter._format_dataset_card_from_stats(stats, dataset_name)
+
+    def print_summary(self, examples: list[SFTExample], streaming: bool = False) -> None:
         """Print a summary of the generated dataset."""
         from rich.panel import Panel
         from rich.table import Table
@@ -289,7 +335,10 @@ class SFTDatasetGenerator:
             console.print("[yellow]No examples generated[/yellow]")
             return
 
-        stats = self.sft_formatter.compute_statistics(examples)
+        if streaming:
+            stats = self.sft_formatter.compute_statistics_streaming(examples)
+        else:
+            stats = self.sft_formatter.compute_statistics(examples)
 
         def fmt_size(size: float) -> str:
             if size >= 1_000_000_000:
@@ -411,24 +460,32 @@ def cli(ctx, config, output, cache):
     default=None,
     help="Upload to HuggingFace Hub (default: use config setting)",
 )
+@click.option(
+    "--streaming/--no-streaming",
+    default=True,
+    help="Stream to disk incrementally (saves memory)",
+)
 @click.pass_context
-def generate(ctx, include_deps, format, upload):
+def generate(ctx, include_deps, format, upload, streaming):
     """Generate the SFT dataset from configured repositories."""
     generator = ctx.obj["generator"]
     config = ctx.obj["config"]
 
     # Generate dataset
-    examples = generator.generate_dataset(include_dependencies=include_deps)
+    examples = generator.generate_dataset(
+        include_dependencies=include_deps,
+        streaming=streaming,
+    )
 
     if not examples:
         console.print("[yellow]No examples generated[/yellow]")
         return
 
-    # Save dataset
-    saved_files = generator.save_dataset(examples, output_format=format)
+    # Save dataset (stats and README)
+    saved_files = generator.save_dataset(examples, output_format=format, streaming=streaming)
 
     # Print summary statistics
-    generator.print_summary(examples)
+    generator.print_summary(examples, streaming=streaming)
 
     console.print("\n[bold]Saved files:[/bold]")
     for path in saved_files:

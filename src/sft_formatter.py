@@ -86,6 +86,7 @@ class SFTFormatter:
         output_dir: Path,
         system_prompt: Optional[str] = None,
         compress: bool = True,
+        streaming: bool = True,
     ):
         """
         Initialize the SFT formatter.
@@ -94,11 +95,129 @@ class SFTFormatter:
             output_dir: Directory to save output files
             system_prompt: Custom system prompt for chat format
             compress: Whether to compress output files
+            streaming: Whether to stream examples to disk incrementally
         """
         self.output_dir = Path(output_dir)
         self.output_dir.mkdir(parents=True, exist_ok=True)
         self.system_prompt = system_prompt or DEFAULT_SYSTEM_PROMPT
         self.compress = compress
+        self.streaming = streaming
+        
+        # For streaming mode
+        self._stream_file = None
+        self._stream_chat_file = None
+        self._streamed_examples: list[SFTExample] = []  # Keep lightweight metadata only
+    
+    def start_streaming(self, filename: str = "dataset.jsonl") -> None:
+        """Start streaming mode - open files for incremental writes."""
+        if not self.streaming:
+            return
+            
+        output_path = self.output_dir / filename
+        chat_path = self.output_dir / filename.replace(".jsonl", "_chat.jsonl")
+        
+        if self.compress:
+            output_path = output_path.with_suffix(".jsonl.gz")
+            chat_path = chat_path.with_suffix(".jsonl.gz")
+            self._stream_file = gzip.open(output_path, "wt", encoding="utf-8")
+            self._stream_chat_file = gzip.open(chat_path, "wt", encoding="utf-8")
+        else:
+            self._stream_file = open(output_path, "w", encoding="utf-8")
+            self._stream_chat_file = open(chat_path, "w", encoding="utf-8")
+        
+        self._streamed_examples = []
+        console.print(f"[cyan]Streaming output to {output_path}[/cyan]")
+    
+    def stream_example(self, example: SFTExample) -> None:
+        """Write a single example to disk immediately (streaming mode)."""
+        if self._stream_file is None:
+            self.start_streaming()
+        
+        # Write to main file
+        self._stream_file.write(json.dumps(example.to_dict()) + "\n")
+        self._stream_file.flush()
+        
+        # Write to chat file
+        chat_data = example.to_chat_format(self.system_prompt)
+        self._stream_chat_file.write(json.dumps(chat_data) + "\n")
+        self._stream_chat_file.flush()
+        
+        # Keep lightweight copy for stats (without the huge text fields)
+        lightweight = SFTExample(
+            repo_name=example.repo_name,
+            from_version=example.from_version,
+            to_version=example.to_version,
+            created_at=example.created_at,
+            input_text="",  # Don't store the huge text
+            output_text="",
+            input_tokens_approx=example.input_tokens_approx,
+            output_tokens_approx=example.output_tokens_approx,
+            num_files_in_codebase=example.num_files_in_codebase,
+            num_files_changed=example.num_files_changed,
+            num_dependencies=example.num_dependencies,
+        )
+        # Store actual sizes for stats
+        lightweight._input_size = len(example.input_text)
+        lightweight._output_size = len(example.output_text)
+        self._streamed_examples.append(lightweight)
+    
+    def finish_streaming(self) -> list[SFTExample]:
+        """Close streaming files and return metadata for stats."""
+        if self._stream_file:
+            self._stream_file.close()
+            self._stream_file = None
+        if self._stream_chat_file:
+            self._stream_chat_file.close()
+            self._stream_chat_file = None
+        
+        console.print(f"[green]Streamed {len(self._streamed_examples)} examples to disk[/green]")
+        return self._streamed_examples
+    
+    def compute_statistics_streaming(self, examples: list[SFTExample]) -> dict:
+        """Compute statistics from streamed examples (using stored sizes)."""
+        if not examples:
+            return {}
+
+        input_sizes = [getattr(e, '_input_size', 0) for e in examples]
+        output_sizes = [getattr(e, '_output_size', 0) for e in examples]
+        input_tokens = [e.input_tokens_approx for e in examples]
+        output_tokens = [e.output_tokens_approx for e in examples]
+        files_in_codebase = [e.num_files_in_codebase for e in examples]
+        files_changed = [e.num_files_changed for e in examples]
+
+        repos = set(e.repo_name for e in examples)
+        repo_counts = {
+            repo: len([e for e in examples if e.repo_name == repo])
+            for repo in repos
+        }
+
+        return {
+            "num_examples": len(examples),
+            "num_repos": len(repos),
+            "repo_counts": repo_counts,
+            "input_size_mean": sum(input_sizes) / len(input_sizes) if input_sizes else 0,
+            "input_size_min": min(input_sizes) if input_sizes else 0,
+            "input_size_max": max(input_sizes) if input_sizes else 0,
+            "input_size_total": sum(input_sizes),
+            "output_size_mean": sum(output_sizes) / len(output_sizes) if output_sizes else 0,
+            "output_size_min": min(output_sizes) if output_sizes else 0,
+            "output_size_max": max(output_sizes) if output_sizes else 0,
+            "output_size_total": sum(output_sizes),
+            "input_tokens_mean": sum(input_tokens) / len(input_tokens) if input_tokens else 0,
+            "input_tokens_min": min(input_tokens) if input_tokens else 0,
+            "input_tokens_max": max(input_tokens) if input_tokens else 0,
+            "input_tokens_total": sum(input_tokens),
+            "output_tokens_mean": sum(output_tokens) / len(output_tokens) if output_tokens else 0,
+            "output_tokens_min": min(output_tokens) if output_tokens else 0,
+            "output_tokens_max": max(output_tokens) if output_tokens else 0,
+            "output_tokens_total": sum(output_tokens),
+            "files_in_codebase_mean": sum(files_in_codebase) / len(files_in_codebase) if files_in_codebase else 0,
+            "files_in_codebase_min": min(files_in_codebase) if files_in_codebase else 0,
+            "files_in_codebase_max": max(files_in_codebase) if files_in_codebase else 0,
+            "files_changed_mean": sum(files_changed) / len(files_changed) if files_changed else 0,
+            "files_changed_min": min(files_changed) if files_changed else 0,
+            "files_changed_max": max(files_changed) if files_changed else 0,
+        }
 
     def create_example(
         self,
@@ -588,6 +707,97 @@ MIT License
             return "100K<n<1M"
         else:
             return "n>1M"
+
+    def _format_dataset_card_from_stats(self, stats: dict, dataset_name: str) -> str:
+        """Generate a HuggingFace dataset card from pre-computed stats."""
+        if not stats:
+            return "# Empty Dataset\n\nNo examples generated."
+
+        def fmt_size(size: float) -> str:
+            if size >= 1_000_000_000:
+                return f"{size / 1_000_000_000:.2f} GB"
+            elif size >= 1_000_000:
+                return f"{size / 1_000_000:.2f} MB"
+            elif size >= 1_000:
+                return f"{size / 1_000:.2f} KB"
+            return f"{size:.0f} bytes"
+
+        repos_list = "\n".join(f"  - {repo}" for repo in sorted(stats.get('repo_counts', {}).keys()))
+
+        card = f"""---
+license: mit
+task_categories:
+  - text-generation
+language:
+  - code
+tags:
+  - code
+  - sft
+  - fine-tuning
+  - software-engineering
+  - version-control
+size_categories:
+  - {self._get_size_category(stats.get('num_examples', 0))}
+---
+
+# {dataset_name}
+
+SFT (Supervised Fine-Tuning) dataset for training models to predict code changes between software versions.
+
+## Dataset Description
+
+Each example contains:
+- **Input**: Complete codebase at version N (including dependencies)
+- **Output**: Full diff to version N+1
+
+This enables training models to understand software evolution patterns and predict code changes.
+
+## Statistics
+
+| Metric | Value |
+|--------|-------|
+| Total Examples | {stats.get('num_examples', 0):,} |
+| Repositories | {stats.get('num_repos', 0)} |
+| Total Size | {fmt_size(stats.get('input_size_total', 0) + stats.get('output_size_total', 0))} |
+
+### Input (Codebase)
+| Metric | Size | Tokens |
+|--------|------|--------|
+| Mean | {fmt_size(stats.get('input_size_mean', 0))} | ~{stats.get('input_tokens_mean', 0):,.0f} |
+| Min | {fmt_size(stats.get('input_size_min', 0))} | ~{stats.get('input_tokens_min', 0):,} |
+| Max | {fmt_size(stats.get('input_size_max', 0))} | ~{stats.get('input_tokens_max', 0):,} |
+
+### Output (Diff)
+| Metric | Size | Tokens |
+|--------|------|--------|
+| Mean | {fmt_size(stats.get('output_size_mean', 0))} | ~{stats.get('output_tokens_mean', 0):,.0f} |
+| Min | {fmt_size(stats.get('output_size_min', 0))} | ~{stats.get('output_tokens_min', 0):,} |
+| Max | {fmt_size(stats.get('output_size_max', 0))} | ~{stats.get('output_tokens_max', 0):,} |
+
+## Source Repositories
+
+{repos_list}
+
+## Usage
+
+```python
+from datasets import load_dataset
+
+dataset = load_dataset("{dataset_name}")
+
+# Access an example
+example = dataset["train"][0]
+print(f"Repo: {{example['repo_name']}}")
+print(f"Version: {{example['from_version']}} -> {{example['to_version']}}")
+print(f"Input length: {{len(example['input_text']):,}} chars")
+print(f"Output length: {{len(example['output_text']):,}} chars")
+```
+
+## License
+
+MIT License
+"""
+        return card
 
     def split_dataset(
         self,
