@@ -48,7 +48,7 @@ settings:
   output_format: "jsonl"
   
   # Whether to upload to HuggingFace Hub
-  upload_to_hub: true
+  upload_to_hub: false  # Set to true when ready to upload
   
   # HuggingFace Hub username/org
   hub_username: "awhedon"
