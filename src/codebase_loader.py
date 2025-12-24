@@ -20,6 +20,35 @@ class FileInfo:
     content: str
     size: int
     language: str
+    is_binary_stub: bool = False  # True if this is a placeholder for a binary file
+
+
+# Binary file extensions that should be replaced with stubs
+BINARY_EXTENSIONS = {
+    # Images
+    ".png", ".jpg", ".jpeg", ".gif", ".bmp", ".ico", ".webp", ".svg", ".tiff", ".tif",
+    # Audio
+    ".mp3", ".wav", ".ogg", ".flac", ".aac", ".m4a", ".wma",
+    # Video
+    ".mp4", ".avi", ".mov", ".mkv", ".webm", ".wmv", ".flv", ".m4v",
+    # Documents
+    ".pdf", ".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx",
+    # Archives
+    ".zip", ".tar", ".gz", ".bz2", ".xz", ".7z", ".rar", ".tgz",
+    # Python packages
+    ".whl", ".egg",
+    # Compiled/Binary
+    ".so", ".dll", ".dylib", ".exe", ".bin", ".o", ".a", ".lib",
+    # ML model files
+    ".pkl", ".pickle", ".npy", ".npz", ".pt", ".pth", ".onnx", 
+    ".safetensors", ".gguf", ".ggml", ".bin", ".model",
+    # Data formats
+    ".parquet", ".arrow", ".feather", ".h5", ".hdf5",
+    # Fonts
+    ".ttf", ".otf", ".woff", ".woff2", ".eot",
+    # Other
+    ".pyc", ".pyo", ".class", ".jar", ".war",
+}
 
 
 @dataclass
@@ -141,20 +170,25 @@ class CodebaseLoader:
         """
         Load a codebase from a directory.
 
+        Includes ALL files by default. Binary/media files are replaced with
+        small placeholder stubs to preserve their references while keeping
+        the dataset size manageable.
+
         Args:
             repo_path: Path to the repository
             repo_name: Name of the repository
             version: Version/tag of the repository
-            file_patterns: Glob patterns for files to include
-            exclude_patterns: Glob patterns for files to exclude
+            file_patterns: Glob patterns for files to include (None = all files)
+            exclude_patterns: Glob patterns for files to exclude (None = none)
 
         Returns:
-            CodebaseSnapshot containing all matching files
+            CodebaseSnapshot containing all files
         """
+        # Default: include everything, exclude nothing
         if file_patterns is None:
-            file_patterns = ["*.py", "*.cpp", "*.h", "*.cu", "*.cuh"]
+            file_patterns = ["*"]  # All files
         if exclude_patterns is None:
-            exclude_patterns = ["tests/*", "test/*", "docs/*", "*_test.py", "test_*.py"]
+            exclude_patterns = []  # No exclusions
 
         files = []
         total_size = 0
@@ -242,34 +276,83 @@ class CodebaseLoader:
                 yield Path(root) / file
 
     def _load_file(self, repo_path: Path, file_path: Path) -> Optional[FileInfo]:
-        """Load a single file."""
+        """Load a single file, replacing binary files with stubs."""
         try:
             file_size = file_path.stat().st_size
+            rel_path = str(file_path.relative_to(repo_path))
+            language = self._detect_language(file_path)
 
-            # Skip files that are too large
+            # Check if this is a known binary extension
+            if file_path.suffix.lower() in BINARY_EXTENSIONS:
+                return self._create_binary_stub(rel_path, file_size, language, file_path.suffix)
+
+            # Skip files that are too large (but still create a stub reference)
             if file_size > self.max_file_size:
-                return None
+                return FileInfo(
+                    path=rel_path,
+                    content=f"[FILE TOO LARGE: {file_size:,} bytes - content omitted]",
+                    size=len(f"[FILE TOO LARGE: {file_size:,} bytes - content omitted]"),
+                    language=language,
+                    is_binary_stub=True,
+                )
 
-            # Skip binary files
+            # Check if file is binary (null bytes or decode failure)
             if self._is_binary(file_path):
-                return None
+                return self._create_binary_stub(rel_path, file_size, language, file_path.suffix)
 
             with open(file_path, encoding="utf-8", errors="replace") as f:
                 content = f.read()
-
-            rel_path = str(file_path.relative_to(repo_path))
-            language = self._detect_language(file_path)
 
             return FileInfo(
                 path=rel_path,
                 content=content,
                 size=file_size,
                 language=language,
+                is_binary_stub=False,
             )
 
         except (OSError, UnicodeDecodeError) as e:
             console.print(f"[yellow]Warning: Could not read {file_path}: {e}[/yellow]")
             return None
+
+    def _create_binary_stub(
+        self, rel_path: str, file_size: int, language: str, extension: str
+    ) -> FileInfo:
+        """Create a placeholder stub for a binary file."""
+        file_type = self._get_binary_file_type(extension)
+        stub_content = f"[BINARY {file_type}: {file_size:,} bytes]"
+
+        return FileInfo(
+            path=rel_path,
+            content=stub_content,
+            size=len(stub_content),
+            language=language,
+            is_binary_stub=True,
+        )
+
+    def _get_binary_file_type(self, extension: str) -> str:
+        """Get a human-readable type for binary files."""
+        ext = extension.lower()
+        if ext in {".png", ".jpg", ".jpeg", ".gif", ".bmp", ".ico", ".webp", ".svg", ".tiff", ".tif"}:
+            return "IMAGE"
+        elif ext in {".mp3", ".wav", ".ogg", ".flac", ".aac", ".m4a", ".wma"}:
+            return "AUDIO"
+        elif ext in {".mp4", ".avi", ".mov", ".mkv", ".webm", ".wmv", ".flv", ".m4v"}:
+            return "VIDEO"
+        elif ext in {".pdf", ".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx"}:
+            return "DOCUMENT"
+        elif ext in {".zip", ".tar", ".gz", ".bz2", ".xz", ".7z", ".rar", ".tgz"}:
+            return "ARCHIVE"
+        elif ext in {".pkl", ".pickle", ".npy", ".npz", ".pt", ".pth", ".onnx", ".safetensors", ".gguf"}:
+            return "MODEL/DATA"
+        elif ext in {".so", ".dll", ".dylib", ".exe", ".bin", ".o", ".a"}:
+            return "COMPILED"
+        elif ext in {".ttf", ".otf", ".woff", ".woff2", ".eot"}:
+            return "FONT"
+        elif ext in {".whl", ".egg"}:
+            return "PACKAGE"
+        else:
+            return "FILE"
 
     def _is_binary(self, file_path: Path) -> bool:
         """Check if a file is binary."""

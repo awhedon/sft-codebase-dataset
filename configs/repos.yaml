@@ -4,80 +4,31 @@
 #   - description: Brief description of the repository
 #   - min_version: (optional) Minimum version to start from
 #   - max_versions: (optional) Maximum number of version pairs to generate
-#   - file_patterns: (optional) Glob patterns to include (default: all code files)
-#   - exclude_patterns: (optional) Glob patterns to exclude
+#
+# NOTE: We include ALL files by default (tests, docs, examples, etc.)
+# Binary/media files are replaced with placeholder stubs to preserve references.
 
 repositories:
   - name: "NVIDIA/TensorRT-LLM"
     description: "NVIDIA's TensorRT-LLM library for LLM inference optimization"
-    file_patterns:
-      - "*.py"
-      - "*.cpp"
-      - "*.h"
-      - "*.cu"
-      - "*.cuh"
-    exclude_patterns:
-      - "tests/*"
-      - "examples/*"
-      - "benchmarks/*"
 
   - name: "huggingface/transformers"
     description: "HuggingFace Transformers library"
-    file_patterns:
-      - "*.py"
-    exclude_patterns:
-      - "tests/*"
-      - "examples/*"
-      - "docs/*"
 
   - name: "pytorch/pytorch"
     description: "PyTorch deep learning framework"
-    file_patterns:
-      - "*.py"
-      - "*.cpp"
-      - "*.h"
-      - "*.cu"
-    exclude_patterns:
-      - "test/*"
-      - "benchmarks/*"
-      - "docs/*"
 
   - name: "vllm-project/vllm"
     description: "vLLM high-throughput LLM inference engine"
-    file_patterns:
-      - "*.py"
-      - "*.cpp"
-      - "*.h"
-      - "*.cu"
-    exclude_patterns:
-      - "tests/*"
-      - "benchmarks/*"
 
   - name: "openai/triton"
     description: "OpenAI Triton language and compiler"
-    file_patterns:
-      - "*.py"
-      - "*.cpp"
-      - "*.h"
-    exclude_patterns:
-      - "test/*"
-      - "docs/*"
 
   - name: "mlflow/mlflow"
     description: "MLflow ML lifecycle platform"
-    file_patterns:
-      - "*.py"
-    exclude_patterns:
-      - "tests/*"
-      - "docs/*"
 
   - name: "langchain-ai/langchain"
     description: "LangChain framework for LLM applications"
-    file_patterns:
-      - "*.py"
-    exclude_patterns:
-      - "tests/*"
-      - "docs/*"
 
 # Global settings
 settings:
@@ -85,7 +36,7 @@ settings:
   max_file_size: 1048576  # 1MB
   
   # Maximum total codebase size (in bytes)
-  max_codebase_size: 104857600  # 100MB
+  max_codebase_size: 524288000  # 500MB - increased to include full codebases
   
   # Whether to include dependency source code
   include_dependencies: true
@@ -101,4 +52,55 @@ settings:
   
   # HuggingFace dataset name (if uploading)
   hub_dataset_name: "sft-codebase-diffs"
+  
+  # Binary/media file extensions to replace with stubs (preserves reference)
+  binary_extensions:
+    - ".png"
+    - ".jpg"
+    - ".jpeg"
+    - ".gif"
+    - ".bmp"
+    - ".ico"
+    - ".webp"
+    - ".svg"
+    - ".mp3"
+    - ".mp4"
+    - ".wav"
+    - ".ogg"
+    - ".flac"
+    - ".avi"
+    - ".mov"
+    - ".mkv"
+    - ".webm"
+    - ".pdf"
+    - ".zip"
+    - ".tar"
+    - ".gz"
+    - ".bz2"
+    - ".xz"
+    - ".7z"
+    - ".rar"
+    - ".whl"
+    - ".egg"
+    - ".so"
+    - ".dll"
+    - ".dylib"
+    - ".exe"
+    - ".bin"
+    - ".pkl"
+    - ".pickle"
+    - ".npy"
+    - ".npz"
+    - ".pt"
+    - ".pth"
+    - ".onnx"
+    - ".safetensors"
+    - ".gguf"
+    - ".parquet"
+    - ".arrow"
+    - ".ttf"
+    - ".otf"
+    - ".woff"
+    - ".woff2"
+    - ".eot"
 

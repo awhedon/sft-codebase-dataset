@@ -289,13 +289,13 @@ class DependencyResolver:
                 self.version_fetcher.checkout_version(repo_path, latest_release)
                 version = latest_release.tag_name
 
-            # Load the codebase
+            # Load the codebase (include everything, binary files become stubs)
             return self.codebase_loader.load_codebase(
                 repo_path=repo_path,
                 repo_name=dependency.github_repo,
                 version=version,
-                file_patterns=file_patterns or ["*.py"],
-                exclude_patterns=["tests/*", "test/*", "docs/*", "examples/*"],
+                file_patterns=file_patterns or ["*"],
+                exclude_patterns=[],  # Include all files
             )
 
         except Exception as e:

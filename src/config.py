@@ -16,8 +16,10 @@ class RepoConfig:
     description: str = ""
     min_version: Optional[str] = None
     max_versions: Optional[int] = None
-    file_patterns: list[str] = field(default_factory=lambda: ["*.py", "*.cpp", "*.h", "*.cu"])
-    exclude_patterns: list[str] = field(default_factory=lambda: ["tests/*", "docs/*"])
+    # Default: include all files, exclude nothing
+    # Binary files are automatically replaced with stubs
+    file_patterns: list[str] = field(default_factory=lambda: ["*"])
+    exclude_patterns: list[str] = field(default_factory=list)
 
     @property
     def owner(self) -> str:
@@ -63,8 +65,8 @@ class Config:
                 description=repo.get("description", ""),
                 min_version=repo.get("min_version"),
                 max_versions=repo.get("max_versions"),
-                file_patterns=repo.get("file_patterns", ["*.py", "*.cpp", "*.h", "*.cu"]),
-                exclude_patterns=repo.get("exclude_patterns", ["tests/*", "docs/*"]),
+                file_patterns=repo.get("file_patterns", ["*"]),  # All files by default
+                exclude_patterns=repo.get("exclude_patterns", []),  # No exclusions by default
             )
             for repo in data.get("repositories", [])
         ]
