@@ -263,16 +263,83 @@ class SFTDatasetGenerator:
             path = self.sft_formatter.save_examples_parquet(examples, "dataset.parquet")
             saved_files.append(path)
 
-        # Save statistics
+        # Save statistics report
         stats_report = self.sft_formatter.generate_stats_report(examples)
         stats_path = self.config.output_dir / "stats.md"
         with open(stats_path, "w") as f:
             f.write(stats_report)
         saved_files.append(stats_path)
 
-        console.print(stats_report)
+        # Save dataset card (README.md for HuggingFace)
+        dataset_name = self.config.settings.get_hub_dataset_name()
+        dataset_card = self.sft_formatter.generate_dataset_card(examples, dataset_name)
+        card_path = self.config.output_dir / "README.md"
+        with open(card_path, "w") as f:
+            f.write(dataset_card)
+        saved_files.append(card_path)
 
         return saved_files
+
+    def print_summary(self, examples: list[SFTExample]) -> None:
+        """Print a summary of the generated dataset."""
+        from rich.panel import Panel
+        from rich.table import Table
+
+        if not examples:
+            console.print("[yellow]No examples generated[/yellow]")
+            return
+
+        stats = self.sft_formatter.compute_statistics(examples)
+
+        def fmt_size(size: float) -> str:
+            if size >= 1_000_000_000:
+                return f"{size / 1_000_000_000:.2f} GB"
+            elif size >= 1_000_000:
+                return f"{size / 1_000_000:.2f} MB"
+            elif size >= 1_000:
+                return f"{size / 1_000:.2f} KB"
+            return f"{size:.0f} B"
+
+        # Summary table
+        table = Table(title="Dataset Summary", show_header=True, header_style="bold cyan")
+        table.add_column("Metric", style="dim")
+        table.add_column("Input (Codebase)", justify="right")
+        table.add_column("Output (Diff)", justify="right")
+
+        table.add_row(
+            "Mean Size",
+            fmt_size(stats['input_size_mean']),
+            fmt_size(stats['output_size_mean']),
+        )
+        table.add_row(
+            "Min Size",
+            fmt_size(stats['input_size_min']),
+            fmt_size(stats['output_size_min']),
+        )
+        table.add_row(
+            "Max Size",
+            fmt_size(stats['input_size_max']),
+            fmt_size(stats['output_size_max']),
+        )
+        table.add_row(
+            "Mean Tokens",
+            f"{stats['input_tokens_mean']:,.0f}",
+            f"{stats['output_tokens_mean']:,.0f}",
+        )
+
+        console.print()
+        console.print(Panel(
+            f"[bold green]✓ Generated {stats['num_examples']} examples[/bold green]\n"
+            f"From {stats['num_repos']} repositories\n"
+            f"Total size: {fmt_size(stats['input_size_total'] + stats['output_size_total'])}",
+            title="Dataset Complete",
+        ))
+        console.print(table)
+
+        # Repo breakdown
+        console.print("\n[bold]Per-Repository Breakdown:[/bold]")
+        for repo, count in sorted(stats['repo_counts'].items()):
+            console.print(f"  • {repo}: {count} examples")
 
     def upload_to_hub(
         self,
@@ -360,10 +427,12 @@ def generate(ctx, include_deps, format, upload):
     # Save dataset
     saved_files = generator.save_dataset(examples, output_format=format)
 
-    console.print("\n[bold green]Dataset generated successfully![/bold green]")
-    console.print("Saved files:")
+    # Print summary statistics
+    generator.print_summary(examples)
+
+    console.print("\n[bold]Saved files:[/bold]")
     for path in saved_files:
-        console.print(f"  - {path}")
+        console.print(f"  • {path}")
 
     # Upload if requested (CLI flag overrides config)
     should_upload = upload if upload is not None else config.settings.upload_to_hub
@@ -371,7 +440,7 @@ def generate(ctx, include_deps, format, upload):
         dataset_name = config.settings.get_hub_dataset_name()
         console.print(f"\n[cyan]Uploading to HuggingFace Hub as {dataset_name}...[/cyan]")
         url = generator.upload_to_hub(examples)
-        console.print(f"[green]Uploaded to: {url}[/green]")
+        console.print(f"[green]✓ Uploaded to: {url}[/green]")
 
 
 @cli.command()

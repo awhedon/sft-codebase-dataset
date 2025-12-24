@@ -350,35 +350,244 @@ class SFTFormatter:
         if not examples:
             return "No examples in dataset."
 
-        total_input_tokens = sum(e.input_tokens_approx for e in examples)
-        total_output_tokens = sum(e.output_tokens_approx for e in examples)
-        total_files = sum(e.num_files_in_codebase for e in examples)
-        total_changed = sum(e.num_files_changed for e in examples)
+        stats = self.compute_statistics(examples)
+        return self._format_stats_report(stats)
+
+    def compute_statistics(self, examples: list[SFTExample]) -> dict:
+        """Compute detailed statistics for the dataset."""
+        if not examples:
+            return {}
+
+        input_sizes = [len(e.input_text) for e in examples]
+        output_sizes = [len(e.output_text) for e in examples]
+        input_tokens = [e.input_tokens_approx for e in examples]
+        output_tokens = [e.output_tokens_approx for e in examples]
+        files_in_codebase = [e.num_files_in_codebase for e in examples]
+        files_changed = [e.num_files_changed for e in examples]
 
         repos = set(e.repo_name for e in examples)
+        repo_counts = {
+            repo: len([e for e in examples if e.repo_name == repo])
+            for repo in repos
+        }
 
-        report = f"""
-# SFT Dataset Statistics
+        return {
+            "num_examples": len(examples),
+            "num_repos": len(repos),
+            "repo_counts": repo_counts,
+            # Input sizes (characters)
+            "input_size_mean": sum(input_sizes) / len(input_sizes),
+            "input_size_min": min(input_sizes),
+            "input_size_max": max(input_sizes),
+            "input_size_total": sum(input_sizes),
+            # Output sizes (characters)
+            "output_size_mean": sum(output_sizes) / len(output_sizes),
+            "output_size_min": min(output_sizes),
+            "output_size_max": max(output_sizes),
+            "output_size_total": sum(output_sizes),
+            # Token estimates
+            "input_tokens_mean": sum(input_tokens) / len(input_tokens),
+            "input_tokens_min": min(input_tokens),
+            "input_tokens_max": max(input_tokens),
+            "input_tokens_total": sum(input_tokens),
+            "output_tokens_mean": sum(output_tokens) / len(output_tokens),
+            "output_tokens_min": min(output_tokens),
+            "output_tokens_max": max(output_tokens),
+            "output_tokens_total": sum(output_tokens),
+            # File counts
+            "files_in_codebase_mean": sum(files_in_codebase) / len(files_in_codebase),
+            "files_in_codebase_min": min(files_in_codebase),
+            "files_in_codebase_max": max(files_in_codebase),
+            "files_changed_mean": sum(files_changed) / len(files_changed),
+            "files_changed_min": min(files_changed),
+            "files_changed_max": max(files_changed),
+        }
+
+    def _format_stats_report(self, stats: dict) -> str:
+        """Format statistics as a markdown report."""
+        if not stats:
+            return "No examples in dataset."
+
+        def fmt_size(size: float) -> str:
+            """Format byte size to human readable."""
+            if size >= 1_000_000_000:
+                return f"{size / 1_000_000_000:.2f} GB"
+            elif size >= 1_000_000:
+                return f"{size / 1_000_000:.2f} MB"
+            elif size >= 1_000:
+                return f"{size / 1_000:.2f} KB"
+            return f"{size:.0f} bytes"
+
+        report = f"""# SFT Dataset Statistics
 
 ## Overview
-- Total Examples: {len(examples)}
-- Unique Repositories: {len(repos)}
-- Total Input Tokens (approx): {total_input_tokens:,}
-- Total Output Tokens (approx): {total_output_tokens:,}
+| Metric | Value |
+|--------|-------|
+| Total Examples | {stats['num_examples']:,} |
+| Unique Repositories | {stats['num_repos']} |
+| Total Input Size | {fmt_size(stats['input_size_total'])} |
+| Total Output Size | {fmt_size(stats['output_size_total'])} |
+| Total Tokens (approx) | {stats['input_tokens_total'] + stats['output_tokens_total']:,} |
 
-## Averages per Example
-- Avg Input Tokens: {total_input_tokens // len(examples):,}
-- Avg Output Tokens: {total_output_tokens // len(examples):,}
-- Avg Files in Codebase: {total_files // len(examples):,}
-- Avg Files Changed: {total_changed // len(examples):,}
+## Input Statistics (Codebase)
+| Metric | Characters | Tokens (approx) |
+|--------|------------|-----------------|
+| Mean | {fmt_size(stats['input_size_mean'])} | {stats['input_tokens_mean']:,.0f} |
+| Min | {fmt_size(stats['input_size_min'])} | {stats['input_tokens_min']:,} |
+| Max | {fmt_size(stats['input_size_max'])} | {stats['input_tokens_max']:,} |
+
+## Output Statistics (Diff)
+| Metric | Characters | Tokens (approx) |
+|--------|------------|-----------------|
+| Mean | {fmt_size(stats['output_size_mean'])} | {stats['output_tokens_mean']:,.0f} |
+| Min | {fmt_size(stats['output_size_min'])} | {stats['output_tokens_min']:,} |
+| Max | {fmt_size(stats['output_size_max'])} | {stats['output_tokens_max']:,} |
+
+## File Statistics
+| Metric | Files in Codebase | Files Changed |
+|--------|-------------------|---------------|
+| Mean | {stats['files_in_codebase_mean']:,.0f} | {stats['files_changed_mean']:,.0f} |
+| Min | {stats['files_in_codebase_min']:,} | {stats['files_changed_min']:,} |
+| Max | {stats['files_in_codebase_max']:,} | {stats['files_changed_max']:,} |
 
 ## Repositories
 """
-        for repo in sorted(repos):
-            repo_examples = [e for e in examples if e.repo_name == repo]
-            report += f"- {repo}: {len(repo_examples)} examples\n"
+        for repo, count in sorted(stats['repo_counts'].items()):
+            report += f"- **{repo}**: {count} examples\n"
 
         return report
+
+    def generate_dataset_card(self, examples: list[SFTExample], dataset_name: str) -> str:
+        """Generate a HuggingFace dataset card (README.md)."""
+        stats = self.compute_statistics(examples)
+        
+        if not stats:
+            return "# Empty Dataset\n\nNo examples generated."
+
+        def fmt_size(size: float) -> str:
+            if size >= 1_000_000_000:
+                return f"{size / 1_000_000_000:.2f} GB"
+            elif size >= 1_000_000:
+                return f"{size / 1_000_000:.2f} MB"
+            elif size >= 1_000:
+                return f"{size / 1_000:.2f} KB"
+            return f"{size:.0f} bytes"
+
+        repos_list = "\n".join(f"  - {repo}" for repo in sorted(stats['repo_counts'].keys()))
+
+        card = f"""---
+license: mit
+task_categories:
+  - text-generation
+language:
+  - code
+tags:
+  - code
+  - sft
+  - fine-tuning
+  - software-engineering
+  - version-control
+size_categories:
+  - {self._get_size_category(stats['num_examples'])}
+---
+
+# {dataset_name}
+
+SFT (Supervised Fine-Tuning) dataset for training models to predict code changes between software versions.
+
+## Dataset Description
+
+Each example contains:
+- **Input**: Complete codebase at version N (including dependencies)
+- **Output**: Full diff to version N+1
+
+This enables training models to understand software evolution patterns and predict code changes.
+
+## Statistics
+
+| Metric | Value |
+|--------|-------|
+| Total Examples | {stats['num_examples']:,} |
+| Repositories | {stats['num_repos']} |
+| Total Size | {fmt_size(stats['input_size_total'] + stats['output_size_total'])} |
+
+### Input (Codebase)
+| Metric | Size | Tokens |
+|--------|------|--------|
+| Mean | {fmt_size(stats['input_size_mean'])} | ~{stats['input_tokens_mean']:,.0f} |
+| Min | {fmt_size(stats['input_size_min'])} | ~{stats['input_tokens_min']:,} |
+| Max | {fmt_size(stats['input_size_max'])} | ~{stats['input_tokens_max']:,} |
+
+### Output (Diff)
+| Metric | Size | Tokens |
+|--------|------|--------|
+| Mean | {fmt_size(stats['output_size_mean'])} | ~{stats['output_tokens_mean']:,.0f} |
+| Min | {fmt_size(stats['output_size_min'])} | ~{stats['output_tokens_min']:,} |
+| Max | {fmt_size(stats['output_size_max'])} | ~{stats['output_tokens_max']:,} |
+
+## Source Repositories
+
+{repos_list}
+
+## Usage
+
+```python
+from datasets import load_dataset
+
+dataset = load_dataset("{dataset_name}")
+
+# Access an example
+example = dataset["train"][0]
+print(f"Repo: {{example['repo_name']}}")
+print(f"Version: {{example['from_version']}} -> {{example['to_version']}}")
+print(f"Input length: {{len(example['input_text']):,}} chars")
+print(f"Output length: {{len(example['output_text']):,}} chars")
+```
+
+## Data Format
+
+Each example contains:
+- `repo_name`: Repository name (e.g., "huggingface/transformers")
+- `from_version`: Starting version tag
+- `to_version`: Target version tag
+- `input_text`: Complete codebase as text
+- `output_text`: Unified diff between versions
+- `input_tokens_approx`: Approximate input token count
+- `output_tokens_approx`: Approximate output token count
+- `num_files_in_codebase`: Number of files in input
+- `num_files_changed`: Number of files in diff
+- `num_dependencies`: Number of dependency codebases included
+- `created_at`: Timestamp of example creation
+
+## License
+
+MIT License
+
+## Citation
+
+```bibtex
+@dataset{{sft_codebase_diffs,
+  title = {{SFT Codebase Diffs Dataset}},
+  year = {{2024}},
+  publisher = {{HuggingFace}},
+  url = {{https://huggingface.co/datasets/{dataset_name}}}
+}}
+```
+"""
+        return card
+
+    def _get_size_category(self, num_examples: int) -> str:
+        """Get HuggingFace size category."""
+        if num_examples < 1000:
+            return "n<1K"
+        elif num_examples < 10000:
+            return "1K<n<10K"
+        elif num_examples < 100000:
+            return "10K<n<100K"
+        elif num_examples < 1000000:
+            return "100K<n<1M"
+        else:
+            return "n>1M"
 
     def split_dataset(
         self,
